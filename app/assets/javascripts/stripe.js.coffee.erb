@@ -1,0 +1,45 @@
+DEFAULT_AMOUNT = 5
+SUCCESS_MESSAGE = 'Thank you for your donation! Your help keeps Rails Assets running.'
+STRIPE_MODAL_TRANSITION_MS = 200
+
+DonationButtonController = ($scope, $http, notifications, Popeye, $timeout) ->
+  handler = StripeCheckout.configure
+    key: '<%= Rails.configuration.stripe[:publishable_key] %>'
+    locale: 'auto'
+    token: (token) ->
+      onSuccess = (response) -> notifications.showSuccess(SUCCESS_MESSAGE)
+      onError = (response) -> notifications.showError(message: response.data.error)
+
+      $http.post(Routes.donations_path(), { amount: $scope.amount, token: token }).then onSuccess, onError
+
+      if token.email?
+        analytics.identify(token.email, email: token.email);
+      analytics.track('Donated')
+
+
+  $scope.amount = DEFAULT_AMOUNT
+  $scope.invoke = ->
+    Popeye.openModal
+      scope: $scope
+      templateUrl: 'ng-templates/donate.html'
+      containerClass: 'stripe-modal-container'
+      modalClass: 'stripe-modal'
+    analytics.track('Donation modal opened')
+
+  $scope.next = ->
+    handler.open
+      name: 'Rails Assets'
+      description: 'Donation'
+      amount: $scope.amount * 100
+    $timeout((-> $scope.$close()), STRIPE_MODAL_TRANSITION_MS)
+    analytics.track('Stripe modal opened')
+
+
+angular.module('rails-assets').controller 'DonationButtonController', [
+  '$scope',
+  '$http',
+  'notifications',
+  'Popeye',
+  '$timeout'
+  DonationButtonController
+]

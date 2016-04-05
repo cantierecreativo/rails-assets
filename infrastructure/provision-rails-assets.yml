@@ -1,0 +1,357 @@
+---
+- name: basic provisioning
+  hosts: all
+  user: root
+  roles:
+    - role: rvm_io.rvm1-ruby
+      rvm1_rubies:
+        - 'ruby-2.2.3'
+
+    - role: kamaln7.swapfile
+      swapfile_use_dd: True
+      swapfile_size: 4096
+
+  tasks:
+    - set_fact:
+        app_name: rails-assets
+
+    - name: update installed packages
+      apt: upgrade=safe update_cache=yes cache_valid_time=3600
+
+    - name: install server base packages
+      apt: name={{ item }} state=latest update_cache=yes
+      with_items:
+        - apt-file
+        - bc
+        - build-essential
+        - curl
+        - dnsutils
+        - gettext
+        - git
+        - htop
+        - iftop
+        - iotop
+        - jq
+        - libcurl4-openssl-dev
+        - libgmp-dev
+        - libpq-dev
+        - libxml2-utils
+        - moreutils
+        - nodejs
+        - nodejs-legacy
+        - npm
+        - ntp
+        - pcregrep
+        - pv
+        - python-pip
+        - python-psycopg2
+        - python-virtualenv
+        - redis-tools
+        - rsync
+        - libxml2-utils
+        - xmlstarlet
+        - silversearcher-ag
+        - speedometer
+        - texinfo
+        - tmux
+        - ufw
+        - wget
+        - xmlstarlet
+        - zsh
+
+    - name: install bower
+      npm: name=bower global=yes
+
+- name: install database packages
+  hosts: database
+  user: root
+  tasks:
+    - apt: name={{ item }} state=latest update_cache=yes
+      with_items:
+        - redis-server
+        - postgresql
+        - postgresql-contrib
+
+- name: create users and configure authentication
+  hosts: all
+  user: root
+  tasks:
+    - name: setup app group
+      group: name={{ app_name }} state=present
+
+    - name: setup app user
+      user: name={{ app_name }} shell=/bin/bash
+            groups=rvm,{{ app_name }} append=yes
+
+    # TODO: authorized_key can pull from our site, but it doesn't like our
+    # letsencrypt SSL certs. look into why.
+    - authorized_key: user={{ item }}
+                      key="{{ lookup('file', 'keys.txt') }}"
+      with_items:
+        - root
+        - "{{ app_name }}"
+
+    - name: setup engineers accounts
+      user: name={{ item.username }}
+            shell={{ item.shell }}
+            groups=rvm,{{ app_name }},staff,users
+            append=yes
+      with_items: "{{ engineers }}"
+
+    - name: setup authorized keys for engineers
+      authorized_key: user={{ item.username }}
+                      key="https://github.com/{{ item.github }}.keys"
+      with_items: "{{ engineers }}"
+
+    - name: set tmp permissions
+      file: path=/tmp mode=a+w
+
+    - name: enable agent forwarding
+      lineinfile: dest=/etc/ssh/sshd_config
+                  state=present
+                  regexp='^AllowAgentForwarding'
+                  line='AllowAgentForwarding yes'
+      notify: restart sshd
+
+  handlers:
+    - name: restart sshd
+      service: name=ssh state=restarted
+
+- name: configure firewall
+  hosts: web
+  user: root
+  tasks:
+    - ufw: rule=allow port={{ item }} proto=tcp
+      with_items:
+        - 22
+        - 80
+        - 443
+    - ufw: rule=allow
+           proto=any
+           src={{ hostvars[item]['ansible_eth1']['ipv4']['address'] }}
+      with_inventory_hostnames: all
+    - ufw: policy=allow direction=outgoing
+    - ufw: policy=reject direction=incoming
+    - ufw: state=enabled # also reloads!
+
+- name: install passenger-nginx
+  hosts: web
+  user: root
+  tasks:
+    - apt_key: keyserver=keyserver.ubuntu.com id=561F9B9CAC40B2F7
+    - apt: name={{ item }} state=latest
+      with_items:
+        - apt-transport-https
+        - ca-certificates
+    - apt_repository: state=present
+        repo="deb https://oss-binaries.phusionpassenger.com/apt/passenger trusty main"
+    - apt: name={{ item }} state=latest  update_cache=yes
+      with_items:
+        - nginx-extras
+        - passenger
+
+- name: configure passenger-nginx
+  hosts: web
+  user: root
+  tasks:
+    - shell: passenger-config --root
+      register: passenger_root
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^user'
+        line="user {{ app_name }};"
+      notify: restart nginx
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^\s*passenger_root'
+        insertafter='^http {'
+        line="        passenger_root {{ passenger_root.stdout }};"
+      notify: restart nginx
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^\s*passenger_ruby'
+        insertafter='^http {'
+        line='        passenger_ruby /usr/local/bin/ruby;'
+      notify: restart nginx
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^\s*worker_connections'
+        insertafter='^event {'
+        line='        worker_connections 1024;'
+      notify: restart nginx
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^\s*client_max_body_size'
+        insertafter='^http {'
+        line='        client_max_body_size 50m;'
+      notify: restart nginx
+    - lineinfile: dest=/etc/nginx/nginx.conf state=present
+        regexp='^\s*passenger_max_pool_size'
+        insertafter='^http {'
+        line='        passenger_max_pool_size 6;'
+      notify: restart nginx
+    - template:
+        src=nginx-site.conf.j2
+        dest="/etc/nginx/sites-enabled/{{ app_name }}.conf"
+      notify: restart nginx
+    - file: path=/etc/nginx/sites-enabled/default state=absent
+      notify: restart nginx
+  handlers:
+    - name: restart nginx
+      service: name=nginx state=restarted
+
+- name: configure serving directories and app config
+  hosts: web:worker
+  user: root
+  vars_files:
+    - secret_vars.yml
+  tasks:
+    - file: path=/srv/data
+            state=directory
+            owner={{ app_name }}
+            group=users
+            mode="u=rwx,g=rwx,o=rx"
+
+    - file: path=/home/{{ app_name }}/rails-apps/{{ app_name }}
+            owner={{ app_name }}
+            group=users
+            mode=0770
+            state=directory
+
+    - file: path=/home/{{ app_name }}/rails-apps/{{ app_name }}/shared/config
+            owner={{ app_name }}
+            group=users
+            mode=0770
+            state=directory
+
+    - file: src=/srv/data
+            dest=/home/{{ app_name }}/rails-apps/{{ app_name }}/shared/public
+            owner={{ app_name }}
+            group=users
+            state=link
+            force=yes
+
+    - copy: content="{{ application_yaml_contents }}"
+            dest=/home/{{ app_name }}/rails-apps/{{ app_name }}/shared/config/application.yml
+            owner={{ app_name }}
+            group=users
+            mode=0660
+
+- name: configure data directories for data server (web)
+  hosts: web
+  user: root
+  tasks:
+    - apt: name=nfs-kernel-server
+      notify: reload nfs server
+
+    - lineinfile: dest=/etc/exports
+                  state=present
+                  regexp="^/srv/data "
+                  line="/srv/data 10.132.0.0/16(rw,insecure,sync,all_squash,anonuid=1000,anongid=1001,no_subtree_check)"
+      notify: reload exports
+
+  handlers:
+    - name: reload exports
+      command: exportfs -a
+    - name: reload nfs server
+      service: name=nfs-kernel-server state=restarted
+
+- name: configure data directory for worker (remote mount)
+  hosts: worker
+  user: root
+  tasks:
+    - apt: name=nfs-common state=present update_cache=no
+    - mount: src="{{ hostvars['rails-assets.org']['ansible_eth1']['ipv4']['address'] }}:/srv/data"
+             name=/srv/data
+             fstype=nfs
+             opts=auto
+             dump=0
+             passno=0
+             state=mounted
+      when: rails_env == "production"
+
+- name: sidekiq worker configuration
+  hosts: worker
+  user: root
+  tasks:
+    - copy: src=sudoers dest=/etc/sudoers.d/rails-assets
+    - template: src=upstart/sidekiq.conf
+                dest=/etc/init/sidekiq.conf
+                owner={{ app_name }} group={{ app_name }}
+      notify: restart workers
+    - template: src=upstart/workers.conf
+                dest=/etc/init/workers.conf
+                owner={{ app_name }} group={{ app_name }}
+      notify: restart workers
+
+  handlers:
+    - name: restart workers
+      shell: initctl reload-configuration && (initctl restart workers || initctl start workers)
+
+- name: install lets-encrypt and certificate cron job
+  user: root
+  hosts: web
+  tasks:
+    - template: src=lets-encrypt-config.ini
+                dest=/etc/lets-encrypt-config.ini
+                owner=root group=users
+    - template: src=lets-encrypt-renew-certificate
+                dest=/opt/lets-encrypt-renew-certificate
+                owner=root group=users
+    - name: install lets-encrypt from source
+      git: repo=https://github.com/letsencrypt/letsencrypt
+           dest=/opt/letsencrypt
+           update=no # It updates itself without Git apparently?
+    - name: lets-encrypt certificate renewal cron job
+      cron: job=/opt/lets-encrypt-renew-certificate
+            special_time=weekly
+            name=renew-certificate
+    - command: /opt/letsencrypt/letsencrypt-auto certonly --agree-tos --standalone --config /etc/lets-encrypt-config.ini
+               creates=/etc/letsencrypt/live
+
+
+- name: configure postgres and redis
+  hosts: database
+  user: root
+  tags:
+    - db
+  tasks:
+    - name: configure postgresql to listen on private network
+      lineinfile: dest=/etc/postgresql/9.3/main/postgresql.conf
+                  regexp="^listen_addresses"
+                  line="listen_addresses = 'localhost,{{ ansible_eth1.ipv4.address }}'"
+      notify: restart postgres
+
+    - name: configure postgresql to blindly trust private network
+      lineinfile: dest=/etc/postgresql/9.3/main/pg_hba.conf
+                  regexp="^host\s+all\s+rails_assets\s+"
+                  line="host all rails_assets 10.132.0.0/16 trust"
+      notify: restart postgres
+
+    - name: configure postgresql to trust local users
+      lineinfile: dest=/etc/postgresql/9.3/main/pg_hba.conf
+                  regexp="^local\s+all\s+all\s+"
+                  line="local all all trust"
+      notify: restart postgres
+
+    - name: configure redis to listen on private network
+      lineinfile: dest=/etc/redis/redis.conf
+                  state=present
+                  regexp="^bind"
+                  line="bind 127.0.0.1 {{ ansible_eth1.ipv4.address }}"
+      notify: restart redis
+  handlers:
+    - name: restart postgres
+      service: name=postgresql state=restarted
+    - name: restart redis
+      service: name=redis-server state=restarted
+
+- name: configure application postgres database
+  hosts: database
+  user: root
+  become: True
+  become_user: postgres
+  tags:
+    - db
+  tasks:
+    - postgresql_db: name="rails_assets_{{ rails_env }}"
+                     state=present
+    - postgresql_user: db="rails_assets_{{ rails_env }}"
+                       name=rails_assets
+                       priv=ALL
+                       role_attr_flags=CREATEDB,CREATEROLE,SUPERUSER

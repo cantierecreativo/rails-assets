@@ -14,6 +14,7 @@ RailsAssets::Application.routes.draw do
   end
 
   get "/api/v1/dependencies", to: "main#dependencies"
+  resources :donations, only: :create
 
   require 'sidekiq/web'
   Sidekiq::Web.use(Rack::Auth::Basic) do |user, password|
@@ -28,9 +29,4 @@ RailsAssets::Application.routes.draw do
   root to: "main#home"
 
   get '/home', to: redirect('/')
-
-  match '(errors)/:status', to: 'errors#show',
-    constraints: { status: /\d{3}/ },
-    defaults: { status: '500' },
-    via: :all
 end

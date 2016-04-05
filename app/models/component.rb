@@ -1,7 +1,28 @@
+# == Schema Information
+#
+# Table name: components
+#
+#  id            :integer          not null, primary key
+#  name          :string(255)
+#  description   :text
+#  homepage      :string(255)
+#  created_at    :datetime
+#  updated_at    :datetime
+#  bower_name    :string(255)
+#  summary_cache :json
+#
+# Indexes
+#
+#  index_components_on_name  (name) UNIQUE
+#
+
 class Component < ActiveRecord::Base
   validates :name, presence: true, uniqueness: true
 
   has_many :versions, dependent: :destroy, autosave: false, validate: false
+
+  before_save :update_summary_cache
+  after_touch -> { save }
 
   def full_name
     GEM_PREFIX + name
@@ -28,8 +49,8 @@ class Component < ActiveRecord::Base
   end
 
   def self.needs_build?(name, version = nil)
-    component = Component.includes(:versions).references(:versions).
-      where(name: name).first
+    component = Component.includes(:versions).references(:versions)
+                         .where(name: name).first
 
     if version.nil?
       component.blank? || component.versions.builded.count == 0
@@ -51,5 +72,19 @@ class Component < ActiveRecord::Base
   def self.rebuild!
     Version.update_all(rebuild: true)
     UpdateScheduler.perform_async
+  end
+
+  protected
+
+  # Whenever we change either an attribute of the Component
+  # or build a new version of it, we have to rebuild this.
+  def update_summary_cache
+    self.summary_cache = build_summary_cache
+  end
+
+  def build_summary_cache
+    slice(:name, :description, :homepage).tap do |c|
+      c[:versions] = versions.pluck(:string)
+    end
   end
 end

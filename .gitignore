@@ -16,7 +16,6 @@ node_modules
 
 /test-app/Gemfile.lock
 /config/application.yml
-/config/database.yml
 /public/gems
 /public/quick
 
@@ -24,5 +23,10 @@ node_modules
 /public/specs.4.8.gz
 /public/data
 /public/locks/
+/public/components.json
 
 /rails-assets-*
+
+dump.rdb
+
+Procfile.*

@@ -5,7 +5,7 @@ class Reindex
 
   sidekiq_options queue: 'reindex', unique: :all, retry: 0
 
-  def perform(force = false)
+  def perform(_force = false)
     Build::Locking.with_lock(:index) do
       Version.transaction do
         pending_index_ids = Version.pending_index.pluck(:id)
@@ -13,68 +13,42 @@ class Reindex
         Version.pending_index.update_all(build_status: 'indexed')
 
         generate_indexes
-
-        if ENV['DOMAIN'].present? && ENV['SHELLY_CACHE_AUTH'].present?
-          pending_index_ids.each { |id| Refresh.perform_async(id) }
-        end
       end
     end
 
     # Clear cache for components.json api endpoint
-    Rails.cache.delete('components_json')
+    PageCacheManager.new.expire_page(controller: :components, action: :index, format: :json)
 
     true
   end
 
-  def generate_gemspecs
-    gemspecs_dir = File.join(
-      Figaro.env.data_dir, 'quick', 'Marshal.4.8'
-    )
-
-    FileUtils.mkdir_p(gemspecs_dir)
-
-    gems = Dir[File.join(
-      Figaro.env.data_dir, 'gems', '*.gem'
-    )].map { |s| s.split('/').last[0..-5] }
-
-    gemspecs = Dir[File.join(
-      gemspecs_dir, '*.gemspec.rz'
-    )].map { |s| s.split('/').last[0..-12] }
-
-    missing = gems - gemspecs
-
-    missing.map(&method(:reindex_spec))
-  end
-
   def generate_indexes
     write_index File.join(Figaro.env.data_dir, 'specs.4.8') do
-      Version.
-        builded.
-        joins(:component).
-        order('components.name, versions.position').
-        where(prerelease: false).
-        pluck('components.name', 'string')
+      Version
+        .builded
+        .joins(:component)
+        .order('components.name, versions.position')
+        .where(prerelease: false)
+        .pluck('components.name', 'string')
     end
 
     write_index File.join(Figaro.env.data_dir, 'latest_specs.4.8') do
-      Version.
-        builded.
-        from("(#{
-          Version.select('distinct on (component_id) *').
-          where(prerelease: false).
-          order('component_id, position desc').to_sql
-        }) as versions").
-        joins(:component).order('components.name').
-        pluck('components.name', 'string').to_a
+      Version
+        .builded
+        .from("(#{Version.select('distinct on (component_id) *')
+          .where(prerelease: false)
+          .order('component_id, position desc').to_sql}) as versions")
+        .joins(:component).order('components.name')
+        .pluck('components.name', 'string').to_a
     end
 
     write_index File.join(Figaro.env.data_dir, 'prerelease_specs.4.8') do
-      Version.
-        builded.
-        joins(:component).
-        order('components.name, versions.position').
-        where(prerelease: true).
-        pluck('components.name', 'string')
+      Version
+        .builded
+        .joins(:component)
+        .order('components.name, versions.position')
+        .where(prerelease: true)
+        .pluck('components.name', 'string')
     end
   end
 
@@ -96,7 +70,7 @@ class Reindex
   end
 
   def read_spec(path)
-    Build::GemPackage.open File.open(path), "r", nil do |pkg|
+    Build::GemPackage.open File.open(path), 'r', nil do |pkg|
       return pkg.metadata
     end
   end
@@ -126,9 +100,9 @@ class Reindex
   end
 
   def minimize_specs(data)
-    names     = Hash.new { |h,k| h[k] = k }
-    versions  = Hash.new { |h,k| h[k] = Gem::Version.new(k) }
-    platforms = Hash.new { |h,k| h[k] = k }
+    names     = Hash.new { |h, k| h[k] = k }
+    versions  = Hash.new { |h, k| h[k] = Gem::Version.new(k) }
+    platforms = Hash.new { |h, k| h[k] = k }
 
     data.each do |row|
       row[0] = names[row[0]]
@@ -156,8 +130,8 @@ class Reindex
     @indexer ||=
       begin
         indexer = Gem::Indexer.new(Figaro.env.data_dir,
-                                   :build_legacy => false)
-        def indexer.say(message) end
+                                   build_legacy: false)
+        def indexer.say(_message) end
         indexer
       end
   end

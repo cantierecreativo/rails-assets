@@ -1,24 +1,58 @@
+# == Schema Information
+#
+# Table name: versions
+#
+#  id            :integer          not null, primary key
+#  component_id  :integer
+#  string        :string(255)
+#  dependencies  :hstore
+#  created_at    :datetime
+#  updated_at    :datetime
+#  build_status  :string(255)
+#  build_message :text
+#  asset_paths   :text             default([]), is an Array
+#  main_paths    :text             default([]), is an Array
+#  rebuild       :boolean          default(FALSE)
+#  bower_version :string(255)
+#  position      :string(1023)
+#  prerelease    :boolean          default(FALSE)
+#
+# Indexes
+#
+#  index_versions_on_bower_version  (bower_version)
+#  index_versions_on_build_status   (build_status)
+#  index_versions_on_component_id   (component_id)
+#  index_versions_on_position       (position)
+#  index_versions_on_prerelease     (prerelease)
+#  index_versions_on_rebuild        (rebuild)
+#  index_versions_on_string         (string)
+#
+# Foreign Keys
+#
+#  fk_versions_component_id  (component_id => components.id)
+#
+
 require 'rubygems/version'
 
 class Version < ActiveRecord::Base
   extend Build::Utils
 
-  belongs_to :component
+  belongs_to :component, touch: true
 
   validates :string, presence: true
 
   validates :string, uniqueness: { scope: :component_id }
 
-  scope :indexed, lambda { where(:build_status => "indexed") }
-  scope :builded, lambda { where(:build_status => ["builded", "indexed"]) }
-  scope :pending_index, lambda { where(:build_status => "builded") }
+  scope :indexed, -> { where(build_status: 'indexed') }
+  scope :builded, -> { where(build_status: %w(builded indexed)) }
+  scope :pending_index, -> { where(build_status: 'builded') }
 
   scope :processed, lambda {
-    where(build_status: ["builded", "indexed"], rebuild: false)
+    where(build_status: %w(builded indexed), rebuild: false)
   }
 
   scope :string, lambda { |string|
-    where(:string => self.fix_version_string(string))
+    where(string: fix_version_string(string))
   }
 
   def gem_version
@@ -28,9 +62,7 @@ class Version < ActiveRecord::Base
   after_destroy :remove_component
 
   def remove_component
-    if component.versions.count == 0
-      component.destroy
-    end
+    component.destroy if component.versions.count == 0
   end
 
   before_save :update_caches
@@ -87,18 +119,8 @@ class Version < ActiveRecord::Base
     )
   end
 
-  def gem_url
-    "#{ENV['DOMAIN']}/gems/#{GEM_PREFIX}#{component.name}-#{string}.gem"
-  end
-
-  def gemspec_url
-    "#{ENV['DOMAIN']}/quick/Marshal.4.8/" +
-    "#{GEM_PREFIX}#{component.name}-#{string}.gemspec.rz"
-  end
-
   def rebuild!
     update_attribute(:rebuild, true)
     BuildVersion.perform_async(component.bower_name, bower_version)
   end
-
 end

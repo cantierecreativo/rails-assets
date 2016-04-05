@@ -13,7 +13,7 @@ RailsAssets::Application.configure do
   config.eager_load = true
 
   # Configure static asset server for tests with Cache-Control for performance.
-  config.serve_static_assets  = true
+  config.serve_static_files  = true
   config.static_cache_control = "public, max-age=3600"
 
   # Show full error reports and disable caching.
@@ -33,4 +33,7 @@ RailsAssets::Application.configure do
 
   # Print deprecation notices to the stderr.
   config.active_support.deprecation = :stderr
+
+  # For capybara, make threadsafe
+  config.allow_concurrency = false
 end

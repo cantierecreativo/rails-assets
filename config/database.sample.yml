@@ -1,15 +1,23 @@
-development:
+default: &default
   adapter: postgresql
-  encoding: unicode
-  database: rails_assets_development
   pool: 30
-  username: postgres
-  password:
+  timeout: 5000
+  encoding: unicode
+
+development:
+  <<: *default
+  database: rails_assets_development
 
 test:
-  adapter: postgresql
-  encoding: unicode
+  <<: *default
   database: rails_assets_test
-  pool: 30
-  username: postgres
-  password:
+
+staging:
+  <<: *default
+  database: rails_assets_staging
+  username: rails_assets
+
+production:
+  <<: *default
+  database: rails_assets_production
+  username: rails_assets
