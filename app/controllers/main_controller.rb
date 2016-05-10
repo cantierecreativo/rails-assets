@@ -1,6 +1,4 @@
 class MainController < ApplicationController
-  before_action :redirect_to_https, only: ['home']
-
   def home
     render(json: request.env.inspect) && return if params[:debug]
   end
