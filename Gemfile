@@ -61,16 +61,21 @@ gem 'dotenv'
 gem 'actionpack-page_caching'
 gem 'stripe'
 gem 'js-routes'
+gem "unicorn"
 
 group :development do
   gem 'better_errors'
   gem 'binding_of_caller'
   gem 'capistrano', '~> 3.1'
   gem 'capistrano-touch-linked-files'
-  gem 'capistrano-rails', '~> 1.1'
-  gem 'capistrano-passenger'
   gem 'capistrano-npm'
-  gem 'capistrano-foreman'
+  gem 'capistrano-rails',   '~> 1.1', require: false
+  gem 'capistrano-bundler', '~> 1.1', require: false
+  gem 'capistrano-rbenv',   '~> 2.0', require: false
+  gem 'capistrano3-unicorn'
+  gem 'capistrano-rails-console'
+  gem 'capistrano-db-tasks', require: false
+  gem 'capistrano3-env', '~> 0.1.0'
 end
 
 group :development, :test do

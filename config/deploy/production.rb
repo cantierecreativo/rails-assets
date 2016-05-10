@@ -1,16 +1,3 @@
-# server-based syntax
-# ======================
-# Defines a single server with a list of roles and multiple properties.
-# You can define all roles on a single server, or split them:
-
-server(
-  'srv.rails-assets.org',
-  user: fetch(:deploy_user),
-  roles: %w(app db web)
-)
-
-server(
-  'build-1.rails-assets.org',
-  user: fetch(:deploy_user),
-  roles: %w(worker)
-)
+set :deploy_to, '/srv/rails_assets/production'
+set :rails_env, 'production'
+set :branch, ENV.fetch('branch', 'master')
