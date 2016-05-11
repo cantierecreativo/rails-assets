@@ -3,7 +3,7 @@ require 'capistrano-db-tasks'
 
 lock '3.4.0'
 
-hostname = ENV.fetch("DEPLOY_HOSTNAME", "rails-assets.cantierecreativo.net")
+hostname = ENV.fetch("DEPLOY_HOSTNAME", "")
 
 local_path = File.dirname(File.expand_path(File.join(__FILE__, '..')))
 
