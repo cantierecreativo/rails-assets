@@ -62,6 +62,7 @@ gem 'actionpack-page_caching'
 gem 'stripe'
 gem 'js-routes'
 gem "unicorn"
+gem "dotenv-rails"
 
 group :development do
   gem 'better_errors'

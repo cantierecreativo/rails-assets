@@ -119,6 +119,8 @@ GEM
     domain_name (0.5.20160128)
       unf (>= 0.0.5, < 1.0.0)
     dotenv (0.9.0)
+    dotenv-rails (0.9.0)
+      dotenv (= 0.9.0)
     erubis (2.7.0)
     eventmachine (1.0.8)
     execjs (2.0.1)
@@ -439,6 +441,7 @@ DEPENDENCIES
   coffee-rails
   database_cleaner
   dotenv
+  dotenv-rails
   factory_girl_rails
   faker
   figaro!
